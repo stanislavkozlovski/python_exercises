@@ -12,13 +12,9 @@ sample input 2:
 sample output 2 where 11 is the length of the string:
 WRONG 11
 """
-
-def wrong(user_input: str):
-    print("WRONG {}".format(len(user_input)))
-    exit()
-
+# 100/100
 user_input = input()
-
+invalidBracketOrder = False
 opening_brackets, closing_brackets = 0, 0
 
 for char in user_input:
@@ -28,9 +24,14 @@ for char in user_input:
         elif char == ")" and opening_brackets > closing_brackets:
             closing_brackets += 1
         else:
-            wrong(user_input)
+            invalidBracketOrder = True
+            break
 
-if opening_brackets != closing_brackets:
-    wrong(user_input)
-
-print("OK {}".format(opening_brackets))
+if opening_brackets != closing_brackets or invalidBracketOrder:
+    print("WRONG {}".format(len(user_input)))
+elif len(user_input) < 2:  # if we have less than two characters, we literally cannot have valid parenthesis
+    # the problem's definition of invalid input is really vague, this works fortunately
+    # I personally would define invalid input as input without any parenthesis inside
+    print("INVALID INPUT")
+else:
+    print("OK {}".format(opening_brackets))
