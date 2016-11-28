@@ -34,7 +34,7 @@ The above sample input is just to help you understand the format. The princess (
 Scoring
 Your score is calculated as follows : (NxN - number of moves made to rescue the princess)/10, where N is the size of the grid (3x3 in the sample testcase).
 """
-import math
+
 
 def main():
     rows = int(input())
