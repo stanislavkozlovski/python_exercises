@@ -55,8 +55,8 @@ def get_close_dirty_spot(orig_row, matrix):
         if upper_row >= 0:
             possible_upper_row_spot = contains_dirty_spot(matrix[upper_row])
             if possible_upper_row_spot != 'No Spot':
-                return possible_upper_row_spot  # we've found a dirty spot
-        if lower_row >= 0:
+                return upper_row, possible_upper_row_spot  # we've found a dirty spot
+        if lower_row < len(matrix):
             possible_lower_row_spot = contains_dirty_spot(matrix[lower_row])
             if possible_lower_row_spot != 'No Spot':
                 return lower_row, possible_lower_row_spot
