@@ -1,10 +1,9 @@
-
 def get_min_packages(n, m):
     if n == 1 or m == 1 and n != m:
         if max(n, m) % 2 == 0:
             return max(n,m) // 2
         else:
-            return ((max(n,m) - 1) // 2) + 1
+            return ((max(n,m)) // 2) + 1
     if n % 2 == 0 and m % 2 == 0:
         return (n*m)//4
     elif n % 2 == 0 or m % 2 == 0:
@@ -12,7 +11,7 @@ def get_min_packages(n, m):
         odd_num = n if n % 2 != 0 else m
 
         if even_num > odd_num:
-            return even_num
+            return get_min_packages(even_num, odd_num+1)
         else:
             # ex 4, 7
             # convert odd to even
