@@ -76,3 +76,7 @@ def main():
     components = get_graph_components(graph, astronauts_count)
     result = calculate_possible_pairs_between_components(components)
     print(result)
+
+
+if __name__ == '__main__':
+    main()
