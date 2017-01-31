@@ -1,7 +1,6 @@
 from copy import deepcopy
 from pprint import pprint
-def aa():
-    derive_banned_positions(None, None, None, None, None)
+
 
 def derive_banned_positions(banned_x_y: set(), piece_type, piece, new_x, new_y) -> set():
     """
@@ -109,6 +108,16 @@ def derive_banned_positions(banned_x_y: set(), piece_type, piece, new_x, new_y) 
                 banned_x_y.add((new_x, j))
 
 
+def is_in_danger(board, x, y, danger_pieces):
+    for d_x, d_y in danger_pieces:
+        typ = board[d_x][d_y]
+        for add_x, add_y in POSSIBLE_MOVES[typ]:
+            new_x, new_y = add_x + d_x, add_y + d_y
+            if new_x == x and new_y == y:
+                return True
+
+    return False
+
 def build_board():
     board = []
 
@@ -154,7 +163,8 @@ def recurse(board, black_pieces, white_pieces, max_op):
         nonlocal has_won
         if op == max_op or has_won:
             return
-
+        if len(black_pieces) == 0 or len(white_pieces) == 0:
+            return
         if op % 2 == 0:
             # WHITE MOVE
             w_pieces = deepcopy(white_pieces)  # deepcopy of the set to modify it
@@ -166,14 +176,16 @@ def recurse(board, black_pieces, white_pieces, max_op):
                 white_piece_type = board[w_piece[0]][w_piece[1]]
                 w_pieces.remove(w_piece)
                 banned_x_y = set()
-
+                valid_moves = []
+                killer_moves = []
                 for x, y in POSSIBLE_MOVES[white_piece_type]:
                     new_x, new_y = w_piece[0] + x, w_piece[1] + y
                     new_position = (new_x, new_y)
                     if new_position in w_pieces:
                         # A white piece is in our way
-                        derive_banned_positions(banned_x_y=banned_x_y, piece_type=white_piece_type,
-                                                piece=w_piece, new_x=new_x, new_y=new_y)
+                        if white_piece_type != 'N':
+                            derive_banned_positions(banned_x_y=banned_x_y, piece_type=white_piece_type,
+                                                    piece=w_piece, new_x=new_x, new_y=new_y)
                         continue
                     valid_move = new_position not in w_pieces and 4 > new_x >= 0 <= new_y < 4 and new_position not in banned_x_y
 
@@ -187,29 +199,80 @@ def recurse(board, black_pieces, white_pieces, max_op):
                         elif old_piece is not None and white_piece_type != 'N':
                             derive_banned_positions(banned_x_y=banned_x_y, piece_type=white_piece_type,
                                                     piece=w_piece, new_x=new_x, new_y=new_y)
-
-                        w_pieces.add(new_position)
-                        board[w_piece[0]][w_piece[1]] = None
-                        board[new_x][new_y] = white_piece_type
-
-                        if new_position in black_pieces:
-                            black_pieces.remove(new_position)
-                            # RECURSE
-                            has_killed_queen = __recurse(board, black_pieces=black_pieces, white_pieces=w_pieces, op=op + 1)
-                            black_pieces.add(new_position)
+                        if old_piece is not None:
+                            if white_piece_type == 'Q' and old_piece != 'Q':
+                                # See if we've put our queen in danger, if we have, don't add it
+                                if is_in_danger(board, new_x, new_y, black_pieces):
+                                    pass
+                                else:
+                                    killer_moves.append(new_position)
+                            else:
+                                killer_moves.append(new_position)
                         else:
-                            # RECURSE
-                            has_killed_queen = __recurse(board, black_pieces=black_pieces, white_pieces=w_pieces, op=op + 1)
+                            if white_piece_type == 'Q':
+                                # See if we've put our queen in danger, if we have, don't add it
+                                if is_in_danger(board, new_x, new_y, black_pieces):
+                                    pass
+                                else:
+                                    valid_moves.append(new_position)
+                            else:
+                                valid_moves.append(new_position)
 
-                        # Backtrace
-                        board[new_x][new_y] = old_piece
-                        board[w_piece[0]][w_piece[1]] = white_piece_type
-                        w_pieces.remove(new_position)
-                        """
-                        Since we always take the most optimal move, if there is a move that kills black's queen, we take it
-                        """
-                        if has_killed_queen:
-                            return has_killed_queen
+                for new_x, new_y in killer_moves:
+                    old_piece = board[new_x][new_y]
+                    new_position = (new_x, new_y)
+                    w_pieces.add(new_position)
+                    board[w_piece[0]][w_piece[1]] = None
+                    board[new_x][new_y] = white_piece_type
+
+                    if new_position in black_pieces:
+                        black_pieces.remove(new_position)
+                        # RECURSE
+                        has_killed_queen = __recurse(board, black_pieces=black_pieces, white_pieces=w_pieces, op=op + 1)
+                        black_pieces.add(new_position)
+                    else:
+                        # RECURSE
+                        has_killed_queen = __recurse(board, black_pieces=black_pieces, white_pieces=w_pieces, op=op + 1)
+
+                    # Backtrace
+                    board[new_x][new_y] = old_piece
+                    board[w_piece[0]][w_piece[1]] = white_piece_type
+                    w_pieces.remove(new_position)
+                    """
+                    Since we always take the most optimal move, if there is a move that kills black's queen, we take it
+                    """
+                    if has_killed_queen:
+                        return has_killed_queen
+                for new_x, new_y in valid_moves:
+                    # TODO: Maybe refactor the same for black?
+                    # TODO: Compare moves
+                    # TODO: Dismiss moves that put our thing in danger  (maybe only for the queen for now)
+                    # Since we haven't
+                    old_piece = board[new_x][new_y]
+                    new_position = (new_x, new_y)
+
+                    w_pieces.add(new_position)
+                    board[w_piece[0]][w_piece[1]] = None
+                    board[new_x][new_y] = white_piece_type
+
+                    if new_position in black_pieces:
+                        black_pieces.remove(new_position)
+                        # RECURSE
+                        has_killed_queen = __recurse(board, black_pieces=black_pieces, white_pieces=w_pieces, op=op + 1)
+                        black_pieces.add(new_position)
+                    else:
+                        # RECURSE
+                        has_killed_queen = __recurse(board, black_pieces=black_pieces, white_pieces=w_pieces, op=op + 1)
+
+                    # Backtrace
+                    board[new_x][new_y] = old_piece
+                    board[w_piece[0]][w_piece[1]] = white_piece_type
+                    w_pieces.remove(new_position)
+                    """
+                    Since we always take the most optimal move, if there is a move that kills black's queen, we take it
+                    """
+                    if has_killed_queen:
+                        return has_killed_queen
 
                 w_pieces.add(w_piece)
         else:
@@ -226,9 +289,10 @@ def recurse(board, black_pieces, white_pieces, max_op):
                     new_y = b_y + y
                     new_pos = (new_x, new_y)
                     if new_pos in b_pieces:
-                        # a black piece is in our way
-                        derive_banned_positions(banned_x_y=banned_x_y, piece_type=black_piece_type,
-                                                piece=b_piece, new_x=new_x, new_y=new_y)
+                        if black_piece_type != 'N':
+                            # a black piece is in our way
+                            derive_banned_positions(banned_x_y=banned_x_y, piece_type=black_piece_type,
+                                                    piece=b_piece, new_x=new_x, new_y=new_y)
                         continue
                     valid_move = new_pos not in b_pieces and 4 > new_x >= 0 <= new_y < 4 and new_pos not in banned_x_y
 
@@ -257,6 +321,8 @@ def recurse(board, black_pieces, white_pieces, max_op):
                         board[new_x][new_y] = old_piece
                         board[b_x][b_y] = black_piece_type
                 b_pieces.add(b_piece)
+            if len(results) == 0:
+                raise Exception()
             if all(results):
                 if op == 1:
                     has_won = True
