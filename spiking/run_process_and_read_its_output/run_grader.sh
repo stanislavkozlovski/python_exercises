@@ -1,0 +1,1 @@
+sudo python3 -m grader --sandbox docker tester.py test_script.py
