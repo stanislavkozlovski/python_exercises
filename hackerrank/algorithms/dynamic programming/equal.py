@@ -23,15 +23,14 @@ def get_number_of_operations_to_reduce(number, wanted_number):
 
     return needed_operations
 
-import sys
+
 def minimize_chocolates(chocolates, subtract_from_min=0):
     """
     Get the total number of operations needed to reduce the whole array to a certain value `min_chocolate`
     :param subtract_from_min: A number we want to subtract from our min value (see main() docstring)
     """
     min_chocolate = min(chocolates) - subtract_from_min
-    if min_chocolate < 0:
-        return sys.maxsize
+
     operations_needed = {}  # holds a key of the number and the operations needed for it to reach min_chocolate
     overall_operations = 0
 
