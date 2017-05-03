@@ -4,6 +4,8 @@ This will, unfortunately, support only two players at a time.
 """
 import socket
 import time
+from constants import TicTacToeRows
+
 
 def main():
     server = GameServer()
@@ -85,6 +87,10 @@ class GameServer(Server):
             if is_valid_turn:
                 game.move_position(tuple([int(p) for p in chosen_position.decode().split()]))
                 is_player_one_turn = not is_player_one_turn
+
+                if game.has_ended():
+                    game.winner.send_message('You have won the game!')
+                    return
                 # print the board to both players
                 player_one.send_message(game.get_board_state())
                 player_two.send_message(game.get_board_state())
@@ -110,6 +116,8 @@ class Player:
 
 
 class TicTacToe:
+    valid_winning_rows = [row.value for row in TicTacToeRows]
+
     """ TicTacToe game between two players """
     def __init__(self, player_one: Player, player_two: Player):
         self.player_one = player_one
@@ -125,6 +133,10 @@ class TicTacToe:
             (2, 0), (2, 1), (2, 2)
         }
         self.is_player_one_turn = True
+        self._game_has_ended = False
+        self.needed_symbols = 3  # the number of consecutive symbols needed to win the game
+        self.MAX_X, self.MAX_Y = len(self.board), len(self.board[0])
+        self.winner = None
 
     def get_board_state(self) -> str:
         return ''.join('\n'.join([''.join(row) for row in self.board]))
@@ -145,6 +157,39 @@ class TicTacToe:
         self.board[x][y] = '[' + active_player.symbol + ']'
         self.empty_positions.remove((x, y))
         self.is_player_one_turn = not self.is_player_one_turn
+
+        self.check_game_end(x, y)
+
+    def check_game_end(self, x, y):
+        """ Checks if a winning move has been made"""
+        for valid_row in self.valid_winning_rows:
+            direction_one, direction_two = valid_row
+            row_symbols_count = (  # the number of consecutive symbols in the given row
+                self.__get_consecutive_symbols_count(x, y, direction=direction_one)
+              + self.__get_consecutive_symbols_count(x, y, direction=direction_two)
+              + 1
+            )
+            if row_symbols_count >= self.needed_symbols:
+                # The game has ended, whoever's turn is has losts!
+                self._game_has_ended = True
+                self.winner = self.player_two if self.is_player_one_turn else self.player_one
+                return
+
+    def __get_consecutive_symbols_count(self, start_x: int, start_y: int, direction: (int, int)):
+        dir_x, dir_y = direction
+        orig_symbol = self.board[start_x][start_y]
+        symbol_count = 0
+        curr_x, curr_y = start_x + dir_x, start_y + dir_y
+        # Traverse to the direction until we go out of bounds or find a different symbol
+        while 0 <= curr_x < self.MAX_X and 0 <= curr_y < self.MAX_Y and self.board[curr_x][curr_y] == orig_symbol:
+            symbol_count += 1
+            curr_x += dir_x
+            curr_y += dir_y
+
+        return symbol_count
+
+    def has_ended(self):
+        return self._game_has_ended
 
 
 if __name__ == '__main__':
