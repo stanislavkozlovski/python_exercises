@@ -13,7 +13,7 @@ def receive_message(socket):
 
     return message
 
-ps: socket.socket = socket.create_connection(('Netherbook', 4323))
+ps: socket.socket = socket.create_connection(('Netherbook', 4327))
 
 while True:
     msg = receive_message(ps)

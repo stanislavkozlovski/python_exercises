@@ -6,10 +6,9 @@ import socket
 import time
 from constants import TicTacToeRows
 
-
+# TODO: Handle stalemate
 def main():
     server = GameServer()
-
     try:
         server.start()
     finally:
@@ -20,7 +19,7 @@ class Server:
     def __init__(self):
         self.serversocket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         print(f'Hostname is {socket.gethostname()}')
-        self.serversocket.bind((socket.gethostname(), 4323))
+        self.serversocket.bind((socket.gethostname(), 4327))
         self.serversocket.listen(5)
         self.connections: [(socket.socket, str)] = []  # hold the socket connections
         self.accept_connections = True
@@ -60,6 +59,7 @@ class GameServer(Server):
         if len(self.players) == 2:
             # this is the second player, therefore we can start the game
             self.start_game(self.players[0], self.players[1])
+
         else:
             # the first player connected, send him a message to wait
             current_player.send_message("Welcome to the game. Please wait while a second player connects...")
@@ -98,7 +98,7 @@ class GameServer(Server):
 
 class Player:
     def __init__(self, connection: socket.socket):
-        self.connection = connection
+        self.connection: socket.socket = connection
         self.symbol = None
 
     def set_symbol(self, smb):
@@ -114,29 +114,49 @@ class Player:
             message = self.connection.recv(100)
         return message
 
+    def __eq__(self, other):
+        return self.connection == other.connection
+
+    def __hash__(self):
+        return hash(self.connection.getsockname())
+
 
 class TicTacToe:
+    """ TicTacToe game between two players """
+
     valid_winning_rows = [row.value for row in TicTacToeRows]
 
-    """ TicTacToe game between two players """
-    def __init__(self, player_one: Player, player_two: Player):
+    def __init__(self, player_one: Player, player_two: Player, board_x_size=3, board_y_size=3, needed_symbols=3):
+        if not self._is_valid_board_size(board_x_size, board_y_size, needed_symbols):
+            raise Exception('Invalid board size/needed symbols!')
         self.player_one = player_one
         self.player_two = player_two
-        self.board = [
-            ['[ ]', '[ ]', '[ ]'],
-            ['[ ]', '[ ]', '[ ]'],
-            ['[ ]', '[ ]', '[ ]']
-        ]
-        self.empty_positions = {
-            (0, 0), (0, 1), (0, 2),
-            (1, 0), (1, 1), (1, 2),
-            (2, 0), (2, 1), (2, 2)
-        }
+        self.board = self._build_board(board_x_size, board_y_size)
+        self.empty_positions = self._get_empty_positions()
         self.is_player_one_turn = True
         self._game_has_ended = False
         self.needed_symbols = 3  # the number of consecutive symbols needed to win the game
         self.MAX_X, self.MAX_Y = len(self.board), len(self.board[0])
         self.winner = None
+
+    def _build_board(self, x_size, y_size):
+        """
+        Builds a matrix representing the board
+        """
+        return [['[ ]' for _ in range(y_size)] for _ in range(x_size)]
+
+    def _get_empty_positions(self) -> {(int, int)}:
+        """
+        Iterates through the board and returns a set of tuples, representing all the empty positions on the board
+        """
+        empty_positions = set()
+        for row in range(len(self.board)):
+            for col in range(len(self.board[row])):
+                empty_positions.add((row, col))
+        return empty_positions
+
+    def _is_valid_board_size(self, x_size, y_size, needed_symbols):
+        return not (x_size <= 0 or y_size <= 0 or needed_symbols <= 0 or needed_symbols > min(x_size, y_size))
 
     def get_board_state(self) -> str:
         return ''.join('\n'.join([''.join(row) for row in self.board]))
@@ -165,8 +185,8 @@ class TicTacToe:
         for valid_row in self.valid_winning_rows:
             direction_one, direction_two = valid_row
             row_symbols_count = (  # the number of consecutive symbols in the given row
-                self.__get_consecutive_symbols_count(x, y, direction=direction_one)
-              + self.__get_consecutive_symbols_count(x, y, direction=direction_two)
+                self.__get_consecutive_symbols_count(x, y, direction=direction_one.value)
+              + self.__get_consecutive_symbols_count(x, y, direction=direction_two.value)
               + 1
             )
             if row_symbols_count >= self.needed_symbols:
@@ -174,6 +194,9 @@ class TicTacToe:
                 self._game_has_ended = True
                 self.winner = self.player_two if self.is_player_one_turn else self.player_one
                 return
+
+    def has_ended(self):
+        return self._game_has_ended
 
     def __get_consecutive_symbols_count(self, start_x: int, start_y: int, direction: (int, int)):
         dir_x, dir_y = direction
@@ -187,9 +210,6 @@ class TicTacToe:
             curr_y += dir_y
 
         return symbol_count
-
-    def has_ended(self):
-        return self._game_has_ended
 
 
 if __name__ == '__main__':
