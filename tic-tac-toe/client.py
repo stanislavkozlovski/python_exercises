@@ -1,23 +1,23 @@
 import socket
 import time
+import select
 
 
-def receive_message(socket):
-    message = socket.recv(2000)
-    print(message)
-
-    while not message:
-        time.sleep(1)
-        message = socket.recv(2000)
-        print(message)
-
-    return message
-
-ps: socket.socket = socket.create_connection(('Netherbook', 4327))
+ps: socket.socket = socket.create_connection(('Netherbook', 4328))
 
 while True:
-    msg = receive_message(ps)
-    print()
+    # See if the socket is marked as having data ready.
+    r, w, e = select.select([ps], [], [], 0.1)
+    if r:
+        # msg = receive_message(ps).decode()
+        data = ps.recv(1024)
+        msg = data.decode()
+        print(msg)
 
-    if 'Valid positions:' in msg.decode():
-        ps.send(bytes(input(), encoding='utf-8'))
+        # Length of zero ==> connection closed.
+        if len(data) == 0:
+            cancelled = True
+            break
+
+        if 'Valid positions:' in msg:
+            ps.send(bytes(input(), encoding='utf-8'))

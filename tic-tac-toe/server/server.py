@@ -4,11 +4,16 @@ This will, unfortunately, support only two players at a time.
 """
 import socket
 import time
+import select
 from constants import TicTacToeRows
 
-# TODO: Handle stalemate
+# TODO: Env variables
+# TODO: Multiple players
+# TODO: Handle client disconnect
+
+
 def main():
-    server = GameServer()
+    server = GameServer(max_connections=2)
     try:
         server.start()
     finally:
@@ -16,14 +21,14 @@ def main():
 
 
 class Server:
-    def __init__(self):
+    """ The base server class, which listens on a socket and accepts connections """
+    def __init__(self, max_connections: int):
         self.serversocket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         print(f'Hostname is {socket.gethostname()}')
-        self.serversocket.bind((socket.gethostname(), 4327))
-        self.serversocket.listen(5)
+        self.serversocket.bind((socket.gethostname(), 4328))
+        self.serversocket.listen(max_connections)
         self.connections: [(socket.socket, str)] = []  # hold the socket connections
         self.accept_connections = True
-        self.max_connections = 5
 
     def start(self):
         """
@@ -41,15 +46,17 @@ class Server:
         self.connections.append((clientsocket, address))
 
     def close_connections(self):
+        for conn, _ in self.connections:
+            conn.close()
         self.serversocket.close()
         print('Closed connections!')
 
 
 class GameServer(Server):
-    def __init__(self):
-        super().__init__()
+    def __init__(self, max_connections: int):
+        super().__init__(max_connections)
         self.players = []
-        self.max_connections = 2
+        self.max_connections = max_connections
 
     def accept_connection(self):
         super().accept_connection()
@@ -59,10 +66,9 @@ class GameServer(Server):
         if len(self.players) == 2:
             # this is the second player, therefore we can start the game
             self.start_game(self.players[0], self.players[1])
-
         else:
             # the first player connected, send him a message to wait
-            current_player.send_message("Welcome to the game. Please wait while a second player connects...")
+            current_player.send_message(f"Welcome to the game. {len(self.players)}/{self.max_connections} players waiting for a game\nPlease wait while enough players connect...")
 
     def start_game(self, player_one: 'Player', player_two: 'Player'):
         is_player_one_turn = True
@@ -73,13 +79,15 @@ class GameServer(Server):
         game_start_message = 'The game has started!'
         player_one.send_message(game_start_message)
         player_two.send_message(game_start_message)
+        time.sleep(0.1)
         player_one.send_message(game.get_board_state())
         player_two.send_message(game.get_board_state())
+        time.sleep(0.1)
         while True:
             active_player: Player = player_one if is_player_one_turn else player_two
 
-            active_player.send_message('It is your turn! Please choose a valid position')
-            active_player.send_message(f'Valid positions: {game.get_empty_positions()}')
+            active_player.send_message('\nIt is your turn! Please choose a valid position')
+            active_player.send_message(f'\nValid positions: {game.get_empty_positions()}')
 
             chosen_position = active_player.receive_message()
             is_valid_turn = game.is_valid_position(*[int(p) for p in chosen_position.decode().split()])
@@ -89,7 +97,12 @@ class GameServer(Server):
                 is_player_one_turn = not is_player_one_turn
 
                 if game.has_ended():
-                    game.winner.send_message('You have won the game!')
+                    if game.winner is None:
+                        # Stalemate
+                        game.player_one.send_message("The game has ended in a stalemate!")
+                        game.player_two.send_message("The game has ended in a stalemate!")
+                    else:
+                        game.winner.send_message('You have won the game!')
                     return
                 # print the board to both players
                 player_one.send_message(game.get_board_state())
@@ -108,11 +121,11 @@ class Player:
         self.connection.send(bytes(msg, encoding='utf-8'))
 
     def receive_message(self):
-        message = self.connection.recv(100)
-        while not message:
-            time.sleep(1)
-            message = self.connection.recv(100)
-        return message
+        while True:
+            r, w, e = select.select([self.connection], [], [], 0.1)
+            if r:
+                message = self.connection.recv(1024)
+                return message
 
     def __eq__(self, other):
         return self.connection == other.connection
@@ -172,6 +185,9 @@ class TicTacToe:
     def move_position(self, pos: (int, int)):
         if not self.is_valid_position(*pos):
             raise Exception('Invalid Position!')
+        elif self._game_has_ended:
+            raise Exception('The game has ended, you cannot make more moves!')
+
         x, y = pos
         active_player = self.player_one if self.is_player_one_turn else self.player_two
         self.board[x][y] = '[' + active_player.symbol + ']'
@@ -194,6 +210,11 @@ class TicTacToe:
                 self._game_has_ended = True
                 self.winner = self.player_two if self.is_player_one_turn else self.player_one
                 return
+        if len(self.empty_positions) == 0:
+            # Theere are no moves to be made and we have not found a winner,
+            # therefore this is a stalemate
+            self._game_has_ended = True
+            self.winner = None
 
     def has_ended(self):
         return self._game_has_ended
