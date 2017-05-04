@@ -145,7 +145,8 @@ class GameServer(Server):
                 if game_has_ended:
                     return
 
-    def _parse_player_position(self, position: str) -> ((int, int), bool):
+    @staticmethod
+    def _parse_player_position(position: str) -> ((int, int), bool):
         """
         :return: A tuple, consisting of another another tuple: the coordinates and a bool: if the parse was valid
          e.g: position = "0 1" - returns ((0, 1) True)
@@ -225,8 +226,8 @@ class Player:
 
     def receive_message(self):
         while True:
-            r, w, e = select.select([self.connection], [], [], 0.1)
-            if r:
+            received, *_ = select.select([self.connection], [], [], 0.1)
+            if received:
                 message = self.connection.recv(1024)
                 return message
 
