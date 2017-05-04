@@ -11,9 +11,7 @@ import socket
 import time
 import select
 from constants import TicTacToeRows, MAX_TIC_TAC_TOE_PLAYERS, TIC_TAC_TOE_SYMBOLS
-
-
-
+from settings import HOSTNAME, PORT
 # TODO: Env variables
 
 
@@ -44,10 +42,10 @@ def main():
 class Server:
     """ The base server class, which listens on a socket and accepts connections """
     def __init__(self, max_connections: int):
-        self.serversocket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        print(f'Hostname is {socket.gethostname()}')
-        self.serversocket.bind((socket.gethostname(), 4325))
-        self.serversocket.listen(max_connections)
+        self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        self.server_socket.bind((HOSTNAME, PORT))
+        self.server_socket.listen(max_connections)
         self.max_connections = max_connections
         self.connections: [(socket.socket, str)] = []  # hold the socket connections
         self.accept_connections = True
@@ -63,15 +61,15 @@ class Server:
                 break
 
     def accept_connection(self):
-        clientsocket, address = self.serversocket.accept()
+        clientsocket, address = self.server_socket.accept()
         print(f'Accepted a player - {clientsocket} @ {address}')
         self.connections.append((clientsocket, address))
 
     def close_connections(self):
         for conn, _ in self.connections:
             conn.close()
-        self.serversocket.detach()
-        self.serversocket.close()
+        self.server_socket.detach()
+        self.server_socket.close()
         print('Closed connections!')
 
 
@@ -91,9 +89,20 @@ class GameServer(Server):
         Create the Player objects and fill up your self.players list
         """
         super().accept_connection()
+
+        try:
+            self._check_players()
+        except PlayerDisconnectError as dc_e:
+            # A player has disconnected, remove him from the group
+            self.send_message_to_players(f'{str(dc_e)}\nContinuing to search for players...')
+            dc_player_idx = self._find_dc_player()
+            self.players.pop(dc_player_idx)
+            self.connections.pop(dc_player_idx)
+
         current_connection = self.connections[-1]
         current_player = Player(current_connection[0])
         self.players.append(current_player)
+
         if len(self.players) == self.max_connections:
             # this is the second player, therefore we can start the game
             self.start_game()
@@ -168,6 +177,20 @@ class GameServer(Server):
                 data = pl.connection.recv(1024)
                 if len(data) == 0:
                     raise PlayerDisconnectError(f'Player #{idx} has disconnected!')
+
+    def _find_dc_player(self) -> int:
+        """
+        Find a player that is disconnected
+        :returns the index of the DC player
+        """
+        for idx, pl in enumerate(self.players):
+            received, *_ = select.select([pl.connection], [], [], 0)
+            if received:
+                data = pl.connection.recv(1024)
+                if len(data) == 0:
+                    return idx
+
+        raise Exception('No player has disconnected')
 
     def set_player_symbols(self):
         """ Sets the symbols of the players"""
