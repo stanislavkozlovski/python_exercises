@@ -12,8 +12,13 @@ import time
 import select
 from constants import TicTacToeRows, MAX_TIC_TAC_TOE_PLAYERS, TIC_TAC_TOE_SYMBOLS
 
+
+
 # TODO: Env variables
-# TODO: Handle client disconnect
+
+
+class PlayerDisconnectError(Exception):
+    pass
 
 
 def main():
@@ -116,6 +121,13 @@ class GameServer(Server):
             active_player.send_message(f'\nValid positions: {game.get_empty_positions()}')
 
             chosen_position = active_player.receive_message()
+            try:
+                self._check_players()
+            except PlayerDisconnectError as dc_e:
+                # A player has disconnected, stop the game
+                self.send_message_to_players(f"\n {str(dc_e)}\nThe game will now end.")
+                return
+
             is_valid_turn = game.is_valid_position(*[int(p) for p in chosen_position.decode().split()])
             # TODO: validate position
 
@@ -147,6 +159,15 @@ class GameServer(Server):
             self.send_message_to_players(game.get_board_state())
 
         return game.has_ended()
+
+    def _check_players(self):
+        # Check if every player is still connected
+        for idx, pl in enumerate(self.players):
+            r, w, e = select.select([pl.connection], [], [], 0)
+            if r:
+                data = pl.connection.recv(1024)
+                if len(data) == 0:
+                    raise PlayerDisconnectError(f'Player #{idx} has disconnected!')
 
     def set_player_symbols(self):
         """ Sets the symbols of the players"""
