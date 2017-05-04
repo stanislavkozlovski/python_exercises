@@ -3,7 +3,7 @@ import time
 import select
 
 
-ps: socket.socket = socket.create_connection(('Netherbook', 4328))
+ps: socket.socket = socket.create_connection(('Netherbook', 4325))
 
 while True:
     # See if the socket is marked as having data ready.

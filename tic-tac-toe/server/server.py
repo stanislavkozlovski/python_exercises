@@ -1,19 +1,35 @@
 """
 A NON-ASYNC server for the game Tic Tac Toe.
-This will, unfortunately, support only two players at a time.
+This will, unfortunately, support only one game at a time.
+
+Features:
+    Supports variable game board length
+    Supports multiple players
 """
+import argparse
 import socket
 import time
 import select
-from constants import TicTacToeRows
+from constants import TicTacToeRows, MAX_TIC_TAC_TOE_PLAYERS, TIC_TAC_TOE_SYMBOLS
 
 # TODO: Env variables
-# TODO: Multiple players
 # TODO: Handle client disconnect
 
 
 def main():
-    server = GameServer(max_connections=2)
+    parser = argparse.ArgumentParser(description='Run a Tic Tac Toe game server')
+    parser.add_argument('board_x_size', metavar='X', type=int, nargs='?', default=3,
+                        help='The horizontal size of the board')
+    parser.add_argument('board_y_size', metavar='Y', type=int, nargs='?', default=3,
+                        help='The vertical size of the board')
+    parser.add_argument('needed_symbols', metavar='Z', type=int, nargs='?', default=3,
+                        help='The number of consecutive symbols that account for a winning move.')
+    parser.add_argument('player_count', metavar='P', type=int, nargs='?', default=2,
+                        help='The number of players.', choices=range(2, 10))
+    args = parser.parse_args()
+
+    server = GameServer(player_count=args.player_count, board_x_size=args.board_x_size,
+                        board_y_size=args.board_y_size, needed_symbols=args.needed_symbols)
     try:
         server.start()
     finally:
@@ -25,8 +41,9 @@ class Server:
     def __init__(self, max_connections: int):
         self.serversocket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         print(f'Hostname is {socket.gethostname()}')
-        self.serversocket.bind((socket.gethostname(), 4328))
+        self.serversocket.bind((socket.gethostname(), 4325))
         self.serversocket.listen(max_connections)
+        self.max_connections = max_connections
         self.connections: [(socket.socket, str)] = []  # hold the socket connections
         self.accept_connections = True
 
@@ -48,65 +65,101 @@ class Server:
     def close_connections(self):
         for conn, _ in self.connections:
             conn.close()
+        self.serversocket.detach()
         self.serversocket.close()
         print('Closed connections!')
 
 
 class GameServer(Server):
-    def __init__(self, max_connections: int):
-        super().__init__(max_connections)
+    def __init__(self, player_count: int, board_x_size: int=3, board_y_size: int=3, needed_symbols: int=3):
+        super().__init__(player_count)
+        if not TicTacToe.is_valid_board_size(board_x_size, board_y_size, needed_symbols):
+            raise Exception('Invalid board size/needed symbols!')
+        self.board_x_size = board_x_size
+        self.board_y_size = board_y_size
+        self.needed_symbols = needed_symbols
         self.players = []
-        self.max_connections = max_connections
+        self.player_turn_idx = 0  # TODO: Random
 
     def accept_connection(self):
+        """
+        Create the Player objects and fill up your self.players list
+        """
         super().accept_connection()
         current_connection = self.connections[-1]
         current_player = Player(current_connection[0])
         self.players.append(current_player)
-        if len(self.players) == 2:
+        if len(self.players) == self.max_connections:
             # this is the second player, therefore we can start the game
-            self.start_game(self.players[0], self.players[1])
+            self.start_game()
         else:
             # the first player connected, send him a message to wait
             current_player.send_message(f"Welcome to the game. {len(self.players)}/{self.max_connections} players waiting for a game\nPlease wait while enough players connect...")
 
-    def start_game(self, player_one: 'Player', player_two: 'Player'):
-        is_player_one_turn = True
-        is_valid_turn = True
-        player_one.set_symbol('X')
-        player_two.set_symbol('O')
-        game: TicTacToe = TicTacToe(player_one, player_two)
-        game_start_message = 'The game has started!'
-        player_one.send_message(game_start_message)
-        player_two.send_message(game_start_message)
-        time.sleep(0.1)
-        player_one.send_message(game.get_board_state())
-        player_two.send_message(game.get_board_state())
-        time.sleep(0.1)
-        while True:
-            active_player: Player = player_one if is_player_one_turn else player_two
+    def start_game(self):
+        """
+        The main game loop
+        """
+        self.set_player_symbols()
 
+        game: TicTacToe = TicTacToe(self.players, board_x_size=self.board_x_size, board_y_size=self.board_y_size,
+                                    needed_symbols=self.needed_symbols)
+
+        self.send_message_to_players('The game has started!')
+        time.sleep(0.1)
+        self.send_message_to_players(game.get_board_state())
+        time.sleep(0.1)
+
+        while True:
+            active_player: Player = self.players[self.player_turn_idx]
             active_player.send_message('\nIt is your turn! Please choose a valid position')
             active_player.send_message(f'\nValid positions: {game.get_empty_positions()}')
 
             chosen_position = active_player.receive_message()
             is_valid_turn = game.is_valid_position(*[int(p) for p in chosen_position.decode().split()])
             # TODO: validate position
-            if is_valid_turn:
-                game.move_position(tuple([int(p) for p in chosen_position.decode().split()]))
-                is_player_one_turn = not is_player_one_turn
 
-                if game.has_ended():
-                    if game.winner is None:
-                        # Stalemate
-                        game.player_one.send_message("The game has ended in a stalemate!")
-                        game.player_two.send_message("The game has ended in a stalemate!")
-                    else:
-                        game.winner.send_message('You have won the game!')
+            if is_valid_turn:
+                game_has_ended = self.handle_valid_turn(game, [int(p) for p in chosen_position.decode().split()])
+                if game_has_ended:
                     return
-                # print the board to both players
-                player_one.send_message(game.get_board_state())
-                player_two.send_message(game.get_board_state())
+
+    def handle_valid_turn(self, game: 'TicTacToe', chosen_position: (int, int)) -> bool:
+        """
+        :return: A boolean indicating if the game has ended or not
+        """
+        game.move_position(chosen_position)
+
+        self.player_turn_idx += 1
+        if self.player_turn_idx == len(self.players):
+            self.player_turn_idx = 0
+
+        if game.has_ended():
+            if game.winner is None:
+                # Stalemate
+                self.send_message_to_players("The game has ended in a stalemate!")
+            else:
+                game.winner.send_message('You have won the game!')
+                gw_idx = self.players.index(game.winner)
+                self.send_message_to_players('You have lost the game.', excluding=gw_idx)
+        else:
+            # print the board to the players
+            self.send_message_to_players(game.get_board_state())
+
+        return game.has_ended()
+
+    def set_player_symbols(self):
+        """ Sets the symbols of the players"""
+        for idx, player in enumerate(self.players):
+            player.set_symbol(TIC_TAC_TOE_SYMBOLS[idx])
+
+    def send_message_to_players(self, message: str, excluding: int=-1):
+        """
+        :param excluding: int index pointing out to which player NOT to send the mssage
+        """
+        for i in range(len(self.players)):
+            if i != excluding:
+                self.players[i].send_message(message)
 
 
 class Player:
@@ -139,14 +192,13 @@ class TicTacToe:
 
     valid_winning_rows = [row.value for row in TicTacToeRows]
 
-    def __init__(self, player_one: Player, player_two: Player, board_x_size=3, board_y_size=3, needed_symbols=3):
-        if not self._is_valid_board_size(board_x_size, board_y_size, needed_symbols):
+    def __init__(self, players: [Player], board_x_size=3, board_y_size=3, needed_symbols=3):
+        if not self.is_valid_board_size(board_x_size, board_y_size, needed_symbols):
             raise Exception('Invalid board size/needed symbols!')
-        self.player_one = player_one
-        self.player_two = player_two
         self.board = self._build_board(board_x_size, board_y_size)
         self.empty_positions = self._get_empty_positions()
-        self.is_player_one_turn = True
+        self.active_player_idx = 0
+        self.players = players
         self._game_has_ended = False
         self.needed_symbols = 3  # the number of consecutive symbols needed to win the game
         self.MAX_X, self.MAX_Y = len(self.board), len(self.board[0])
@@ -168,7 +220,8 @@ class TicTacToe:
                 empty_positions.add((row, col))
         return empty_positions
 
-    def _is_valid_board_size(self, x_size, y_size, needed_symbols):
+    @staticmethod
+    def is_valid_board_size(x_size, y_size, needed_symbols):
         return not (x_size <= 0 or y_size <= 0 or needed_symbols <= 0 or needed_symbols > min(x_size, y_size))
 
     def get_board_state(self) -> str:
@@ -189,12 +242,14 @@ class TicTacToe:
             raise Exception('The game has ended, you cannot make more moves!')
 
         x, y = pos
-        active_player = self.player_one if self.is_player_one_turn else self.player_two
+        active_player = self.players[self.active_player_idx]
         self.board[x][y] = '[' + active_player.symbol + ']'
         self.empty_positions.remove((x, y))
-        self.is_player_one_turn = not self.is_player_one_turn
-
         self.check_game_end(x, y)
+
+        self.active_player_idx += 1
+        if self.active_player_idx == len(self.players):
+            self.active_player_idx = 0
 
     def check_game_end(self, x, y):
         """ Checks if a winning move has been made"""
@@ -208,7 +263,7 @@ class TicTacToe:
             if row_symbols_count >= self.needed_symbols:
                 # The game has ended, whoever's turn is has losts!
                 self._game_has_ended = True
-                self.winner = self.player_two if self.is_player_one_turn else self.player_one
+                self.winner = self.players[self.active_player_idx]
                 return
         if len(self.empty_positions) == 0:
             # Theere are no moves to be made and we have not found a winner,

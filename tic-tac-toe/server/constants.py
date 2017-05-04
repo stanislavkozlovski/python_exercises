@@ -24,3 +24,6 @@ class TicTacToeRows(Enum):
     VERTICAL_ROW = (TicTacToeDirections.UP, TicTacToeDirections.DOWN)
     LEFT_DIAGONAL_ROW = (TicTacToeDirections.UPLEFT, TicTacToeDirections.DOWNRIGHT)
     RIGHT_DIAGONAL_ROW = (TicTacToeDirections.UPRIGHT, TicTacToeDirections.DOWNLEFT)
+
+TIC_TAC_TOE_SYMBOLS = ['O', 'X', 'A', 'R', "V", "S", "E", "Q"]
+MAX_TIC_TAC_TOE_PLAYERS = 10
