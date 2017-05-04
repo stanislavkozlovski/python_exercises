@@ -279,7 +279,8 @@ class TicTacToe:
     def get_players(self) -> [Player]:
         return self.players
 
-    def _build_board(self, x_size, y_size):
+    @staticmethod
+    def _build_board(x_size, y_size):
         """
         Builds a matrix representing the board
         """
@@ -292,7 +293,8 @@ class TicTacToe:
         empty_positions = set()
         for row in range(len(self.board)):
             for col in range(len(self.board[row])):
-                empty_positions.add((row, col))
+                if self.board[row][col] == '[ ]':
+                    empty_positions.add((row, col))
         return empty_positions
 
     @staticmethod
