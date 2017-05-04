@@ -138,7 +138,7 @@ class GameServer(Server):
             if not is_valid:
                 continue
 
-            is_valid_turn = game.is_valid_position(*position)
+            is_valid_turn = game.is_free_position(*position)
 
             if is_valid_turn:
                 game_has_ended = self.handle_valid_turn(game, position)
@@ -165,7 +165,7 @@ class GameServer(Server):
         """
         :return: A boolean indicating if the game has ended or not
         """
-        game.move_position(chosen_position)
+        game.run_turn(chosen_position)
 
         if game.has_ended():
             if game.winner is None:
@@ -308,12 +308,12 @@ class TicTacToe:
         """ Returns all the empty positions on the board """
         return self.empty_positions
 
-    def is_valid_position(self, x, y):
+    def is_free_position(self, x, y):
         return (0 <= x < len(self.board) and 0 <= y < len(self.board[0])
                 and self.board[x][y] == '[ ]')
 
     def move_position(self, pos: (int, int)):
-        if not self.is_valid_position(*pos):
+        if not self.is_free_position(*pos):
             raise Exception('Invalid Position!')
         elif self._game_has_ended:
             raise Exception('The game has ended, you cannot make more moves!')
@@ -322,13 +322,16 @@ class TicTacToe:
         active_player = self.players[self._active_player_idx]
         self.board[x][y] = '[' + active_player.symbol + ']'
         self.empty_positions.remove((x, y))
-        self.check_game_end(x, y)
 
+    def run_turn(self, pos: (int, int)):
+        self.move_position(pos)
+        self.check_game_end(*pos)
         self.pass_player_turn()
-
 
     def check_game_end(self, x, y):
         """ Checks if a winning move has been made"""
+        if self.board[x][y] == '[ ]':
+            return False
         for valid_row in self.valid_winning_rows:
             direction_one, direction_two = valid_row
             row_symbols_count = (  # the number of consecutive symbols in the given row
@@ -340,12 +343,13 @@ class TicTacToe:
                 # The game has ended, whoever's turn is has losts!
                 self._game_has_ended = True
                 self.winner = self.players[self._active_player_idx]
-                return
+                return True
         if len(self.empty_positions) == 0:
             # Theere are no moves to be made and we have not found a winner,
             # therefore this is a stalemate
             self._game_has_ended = True
             self.winner = None
+            return True
 
     def has_ended(self):
         return self._game_has_ended
