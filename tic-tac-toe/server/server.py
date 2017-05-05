@@ -7,19 +7,21 @@ Features:
     Supports multiple players
 """
 import argparse
-import socket
 import time
 import select
 from constants import TicTacToeRows, MAX_TIC_TAC_TOE_PLAYERS, TIC_TAC_TOE_SYMBOLS
 from settings import HOSTNAME, PORT
 from random import randint
+from curio import run, spawn
+from curio.socket import *
+import curio
 
 
 class PlayerDisconnectError(Exception):
     pass
 
 
-def main():
+async def main():
     parser = argparse.ArgumentParser(description='Run a Tic Tac Toe game server')
     parser.add_argument('board_x_size', metavar='X', type=int, nargs='?', default=3,
                         help='The horizontal size of the board')
@@ -27,42 +29,52 @@ def main():
                         help='The vertical size of the board')
     parser.add_argument('needed_symbols', metavar='Z', type=int, nargs='?', default=3,
                         help='The number of consecutive symbols that account for a winning move.')
-    parser.add_argument('player_count', metavar='P', type=int, nargs='?', default=2,
+    parser.add_argument('player_count', metavar='P', type=int, nargs='?', default=3,
                         help='The number of players.', choices=range(2, 10))
     args = parser.parse_args()
 
-    server = GameServer(player_count=args.player_count, board_x_size=args.board_x_size,
+    server_socket = socket(AF_INET, SOCK_STREAM)
+    print(server_socket)
+    server_socket.setsockopt(SOL_SOCKET, SO_REUSEADDR, 1)
+    server_socket.bind((HOSTNAME, PORT))
+    server_socket.listen(5)
+    max_connections = 5
+
+    curr_game_serv = GameServer(player_count=args.player_count, board_x_size=args.board_x_size,
                         board_y_size=args.board_y_size, needed_symbols=args.needed_symbols)
-    try:
-        server.start()
-    finally:
-        server.close_connections()
+
+    while True:
+        clientsocket, address = await server_socket.accept()
+        print(f'Accepted a player - {clientsocket} @ {address}')
+        await curr_game_serv.add_player(clientsocket, address)
+        print(len(curr_game_serv.players))
+        if len(curr_game_serv.players) == args.player_count:
+            print('Starting Game')
+            await spawn(curr_game_serv.start_game)
+            curr_game_serv = GameServer(player_count=args.player_count, board_x_size=args.board_x_size,
+                    board_y_size=args.board_y_size, needed_symbols=args.needed_symbols)
+
 
 
 class Server:
     """ The base server class, which listens on a socket and accepts connections """
     def __init__(self, max_connections: int):
-        self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        self.server_socket.bind((HOSTNAME, PORT))
-        self.server_socket.listen(max_connections)
         self.max_connections = max_connections
         self.connections: [(socket.socket, str)] = []  # hold the socket connections
-        self.accept_connections = True
 
-    def start(self):
+    async def start(self):
         """
         Accept connections until we get filled up
         :return:
         """
-        while self.accept_connections:
-            self.accept_connection()
-            if len(self.connections) >= self.max_connections:
-                break
+        async with self.server_socket:
+            while self.accept_connections:
+                # print('accepting')
+                await self.accept_connection()
+                if len(self.connections) >= self.max_connections:
+                    break
 
-    def accept_connection(self):
-        clientsocket, address = self.server_socket.accept()
-        print(f'Accepted a player - {clientsocket} @ {address}')
+    def add_connection(self, clientsocket, address):
         self.connections.append((clientsocket, address))
 
     def close_connections(self):
@@ -83,14 +95,34 @@ class GameServer(Server):
         self.needed_symbols = needed_symbols
         self.players = []
 
-    def accept_connection(self):
+    async def add_player(self, client_socket, address):
+        try:
+            await self._check_players()
+        except PlayerDisconnectError as dc_e:
+            # A player has disconnected, remove him from the group
+            dc_player_idx = await self._find_dc_player()
+            self.players.pop(dc_player_idx)
+            self.connections.pop(dc_player_idx)
+            await self.send_message_to_players(f'{str(dc_e)}\nContinuing to search for players...')
+
+
+        current_player = Player(client_socket)
+
+        if len(self.players) != self.max_connections:
+            await current_player.send_message(f"Welcome to the game. {len(self.players)}/{self.max_connections} players waiting for a game\nPlease wait while enough players connect...")
+
+        self.add_connection(client_socket, address)
+        self.players.append(current_player)
+
+
+    async def accept_connection(self):
         """
         Create the Player objects and fill up your self.players list
         """
-        super().accept_connection()
-
+        await super().accept_connection()
+        print('tank')
         try:
-            self._check_players()
+            await self._check_players()
         except PlayerDisconnectError as dc_e:
             # A player has disconnected, remove him from the group
             self.send_message_to_players(f'{str(dc_e)}\nContinuing to search for players...')
@@ -104,44 +136,53 @@ class GameServer(Server):
 
         if len(self.players) == self.max_connections:
             # this is the second player, therefore we can start the game
-            self.start_game()
+            await self.start_game()
         else:
             # the first player connected, send him a message to wait
-            current_player.send_message(f"Welcome to the game. {len(self.players)}/{self.max_connections} players waiting for a game\nPlease wait while enough players connect...")
+            await current_player.send_message(f"Welcome to the game. {len(self.players)}/{self.max_connections} players waiting for a game\nPlease wait while enough players connect...")
 
-    def start_game(self):
+    async def start_game(self):
         """
         The main game loop
         """
         game: TicTacToe = TicTacToe(self.players, board_x_size=self.board_x_size, board_y_size=self.board_y_size,
                                     needed_symbols=self.needed_symbols)
-
-        self.send_message_to_players('The game has started!')
+        print('aa')
+        await self.send_message_to_players('The game has started!')
         time.sleep(0.1)
-        self.send_message_to_players(game.get_board_state())
+        await self.send_message_to_players(game.get_board_state())
         time.sleep(0.1)
 
         while True:
             active_player: Player = self.players[game.get_player_turn()]
-            active_player.send_message('\nIt is your turn! Please choose a valid position')
-            active_player.send_message(f'\nValid positions: {game.get_empty_positions()}')
+            await active_player.send_message('\nIt is your turn! Please choose a valid position')
+            await active_player.send_message(f'\nValid positions: {game.get_empty_positions()}')
 
-            chosen_position: str = active_player.receive_message().decode()
+            chosen_position: str = await active_player.receive_message()
+            chosen_position = chosen_position.decode()
+            print(f'received {chosen_position}')
             try:
-                self._check_players()
+                print('checkng players')
+                await self._check_players()
             except PlayerDisconnectError as dc_e:
                 # A player has disconnected, stop the game
-                self.send_message_to_players(f"\n {str(dc_e)}\nThe game will now end.")
+                dc_player_idx = await self._find_dc_player()
+                print(f'DC player at ')
+                self.players.pop(dc_player_idx)
+                self.connections.pop(dc_player_idx)
+                await self.send_message_to_players(f"\n {str(dc_e)}\nThe game will now end.")
                 return
+            print('checked players, parsing position')
 
             position, is_valid = self._parse_player_position(chosen_position)
             if not is_valid:
+                print(f'{position} is no valid')
                 continue
 
             is_valid_turn = game.is_free_position(*position)
 
             if is_valid_turn:
-                game_has_ended = self.handle_valid_turn(game, position)
+                game_has_ended = await self.handle_valid_turn(game, position)
                 if game_has_ended:
                     return
 
@@ -161,7 +202,7 @@ class GameServer(Server):
 
         return (x, y), is_valid
 
-    def handle_valid_turn(self, game: 'TicTacToe', chosen_position: (int, int)) -> bool:
+    async def handle_valid_turn(self, game: 'TicTacToe', chosen_position: (int, int)) -> bool:
         """
         :return: A boolean indicating if the game has ended or not
         """
@@ -170,66 +211,66 @@ class GameServer(Server):
         if game.has_ended():
             if game.winner is None:
                 # Stalemate
-                self.send_message_to_players("The game has ended in a stalemate!")
+                await self.send_message_to_players("The game has ended in a stalemate!")
             else:
                 game.winner.send_message('You have won the game!')
                 gw_idx = self.players.index(game.winner)
-                self.send_message_to_players('You have lost the game.', excluding=gw_idx)
+                await self.send_message_to_players('You have lost the game.', excluding=gw_idx)
         else:
             # print the board to the players
-            self.send_message_to_players(game.get_board_state())
+            await self.send_message_to_players(game.get_board_state())
 
         return game.has_ended()
 
-    def _check_players(self):
+    async def _check_players(self):
         # Check if every player is still connected
         for idx, pl in enumerate(self.players):
-            received, *_ = select.select([pl.connection], [], [], 0)
-            if received:
-                data = pl.connection.recv(1024)
-                if len(data) == 0:
-                    raise PlayerDisconnectError(f'Player #{idx} has disconnected!')
+            await pl.send_message('Are you alive?')
+            data = await pl.connection.recv(1024)
+            if len(data) == 0:
+                print(f'Player #{idx} has disconnected!')
+                raise PlayerDisconnectError(f'Player #{idx} has disconnected!')
 
-    def _find_dc_player(self) -> int:
+    async def _find_dc_player(self) -> int:
         """
         Find a player that is disconnected
         :returns the index of the DC player
         """
         for idx, pl in enumerate(self.players):
-            received, *_ = select.select([pl.connection], [], [], 0)
-            if received:
-                data = pl.connection.recv(1024)
-                if len(data) == 0:
-                    return idx
+            try:
+                await pl.send_message('Are you alive?')
+            except BrokenPipeError:
+                return idx
+            data = await pl.connection.recv(1024)
+            if len(data) == 0:
+                return idx
 
         raise Exception('No player has disconnected')
 
-    def send_message_to_players(self, message: str, excluding: int=-1):
+    async def send_message_to_players(self, message: str, excluding: int=-1):
         """
         :param excluding: int index pointing out to which player NOT to send the mssage
         """
         for i in range(len(self.players)):
             if i != excluding:
-                self.players[i].send_message(message)
+                await self.players[i].send_message(message)
 
 
 class Player:
-    def __init__(self, connection: socket.socket):
-        self.connection: socket.socket = connection
+    def __init__(self, connection: socket):
+        self.connection: socket = connection
         self.symbol = None
 
     def set_symbol(self, smb):
         self.symbol = smb
 
-    def send_message(self, msg: str):
-        self.connection.send(bytes(msg, encoding='utf-8'))
+    async def send_message(self, msg: str):
+        await self.connection.send(bytes(msg, encoding='utf-8'))
 
-    def receive_message(self):
+    async def receive_message(self):
         while True:
-            received, *_ = select.select([self.connection], [], [], 0.1)
-            if received:
-                message = self.connection.recv(1024)
-                return message
+            message = await self.connection.recv(1024)
+            return message
 
     def __eq__(self, other):
         return self.connection == other.connection
@@ -369,4 +410,4 @@ class TicTacToe:
 
 
 if __name__ == '__main__':
-    main()
+    run(main, with_monitor=True)

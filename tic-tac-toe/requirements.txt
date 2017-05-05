@@ -1,0 +1,10 @@
+appdirs==1.4.3
+click==6.7
+curio==0.7
+packaging==16.8
+pkg-resources==0.0.0
+pyparsing==2.2.0
+python-dotenv==0.6.4
+six==1.10.0
+timeout-decorator==0.3.3
+websockets==3.3
